@@ -10,12 +10,12 @@ const flat = require("lodash/flatten");
 /**
  * @param {Context} context
  */
-function* expandPatterns(context) {
+async function* expandPatterns(context) {
   const cwd = process.cwd();
   const seen = new Set();
   let noResults = true;
 
-  for (const pathOrError of expandPatternsInternal(context)) {
+  for await (const pathOrError of expandPatternsInternal(context)) {
     noResults = false;
     if (typeof pathOrError !== "string") {
       yield pathOrError;
@@ -44,7 +44,7 @@ function* expandPatterns(context) {
 /**
  * @param {Context} context
  */
-function* expandPatternsInternal(context) {
+async function* expandPatternsInternal(context) {
   // Ignores files in version control systems directories and `node_modules`
   const silentlyIgnoredDirs = {
     ".git": true,
@@ -73,7 +73,7 @@ function* expandPatternsInternal(context) {
       continue;
     }
 
-    const stat = statSafeSync(absolutePath);
+    const stat = await statSafe(absolutePath);
     if (stat) {
       if (stat.isFile()) {
         entries.push({
@@ -107,7 +107,7 @@ function* expandPatternsInternal(context) {
     let result;
 
     try {
-      result = fastGlob.sync(glob, globOptions);
+      result = await fastGlob(glob, globOptions);
     } catch ({ message }) {
       /* istanbul ignore next */
       yield { error: `${errorMessages.globError[type]}: ${input}\n${message}` };
@@ -176,11 +176,11 @@ function sortPaths(paths) {
 /**
  * Get stats of a given path.
  * @param {string} filePath The path to target file.
- * @returns {fs.Stats | undefined} The stats.
+ * @returns {Promise<fs.Stats | undefined>} The stats.
  */
-function statSafeSync(filePath) {
+async function statSafe(filePath) {
   try {
-    return fs.statSync(filePath);
+    return fs.promises.stat(filePath);
   } catch (error) {
     /* istanbul ignore next */
     if (error.code !== "ENOENT") {

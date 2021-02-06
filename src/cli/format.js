@@ -1,10 +1,8 @@
 "use strict";
 
-const fs = require("fs");
 const readline = require("readline");
 const path = require("path");
-
-const chalk = require("chalk");
+const { Worker } = require("worker_threads");
 
 // eslint-disable-next-line no-restricted-modules
 const prettier = require("../index");
@@ -266,7 +264,9 @@ function formatStdin(context) {
     });
 }
 
-function formatFiles(context) {
+const formatChunkSize = 25;
+
+async function formatFiles(context) {
   // The ignorer will be used to filter file paths after the glob is checked,
   // before any files are actually written
   const ignorer = createIgnorerFromContextOrDie(context);
@@ -277,7 +277,30 @@ function formatFiles(context) {
     context.logger.log("Checking formatting...");
   }
 
-  for (const pathOrError of expandPatterns(context)) {
+  const worker = new Worker(path.join(__dirname, "format-worker.js"));
+
+  worker.on('message', data => {
+    switch (data[0]) {
+      case 'foundUnformatted':
+        numberOfUnformattedFilesFound++;
+        break;
+      case 'log':
+        context.logger[data[1]](...data[2]);
+        break;
+      case 'resetTTYLine':
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0, null);
+        break;
+      case 'setExitCode':
+        process.exitCode = data[1];
+        break;
+      case 'doneWork':
+        // todo
+        break;
+    }
+  });
+
+  for await (const pathOrError of expandPatterns(context)) {
     if (typeof pathOrError === "object") {
       context.logger.error(pathOrError.error);
       // Don't exit, but set the exit code to 2
@@ -303,104 +326,7 @@ function formatFiles(context) {
       continue;
     }
 
-    const options = {
-      ...getOptionsForFile(context, filename),
-      filepath: filename,
-    };
-
-    if (isTTY()) {
-      context.logger.log(filename, { newline: false });
-    }
-
-    let input;
-    try {
-      input = fs.readFileSync(filename, "utf8");
-    } catch (error) {
-      // Add newline to split errors from filename line.
-      /* istanbul ignore next */
-      context.logger.log("");
-
-      /* istanbul ignore next */
-      context.logger.error(
-        `Unable to read file: ${filename}\n${error.message}`
-      );
-
-      // Don't exit the process if one file failed
-      /* istanbul ignore next */
-      process.exitCode = 2;
-
-      /* istanbul ignore next */
-      continue;
-    }
-
-    if (fileIgnored) {
-      writeOutput(context, { formatted: input }, options);
-      continue;
-    }
-
-    const start = Date.now();
-
-    let result;
-    let output;
-
-    try {
-      result = format(context, input, options);
-      output = result.formatted;
-    } catch (error) {
-      handleError(context, filename, error);
-      continue;
-    }
-
-    const isDifferent = output !== input;
-
-    if (isTTY()) {
-      // Remove previously printed filename to log it with duration.
-      readline.clearLine(process.stdout, 0);
-      readline.cursorTo(process.stdout, 0, null);
-    }
-
-    if (context.argv.write) {
-      // Don't write the file if it won't change in order not to invalidate
-      // mtime based caches.
-      if (isDifferent) {
-        if (!context.argv.check && !context.argv["list-different"]) {
-          context.logger.log(`${filename} ${Date.now() - start}ms`);
-        }
-
-        try {
-          fs.writeFileSync(filename, output, "utf8");
-        } catch (error) {
-          /* istanbul ignore next */
-          context.logger.error(
-            `Unable to write file: ${filename}\n${error.message}`
-          );
-
-          // Don't exit the process if one file failed
-          /* istanbul ignore next */
-          process.exitCode = 2;
-        }
-      } else if (!context.argv.check && !context.argv["list-different"]) {
-        context.logger.log(`${chalk.grey(filename)} ${Date.now() - start}ms`);
-      }
-    } else if (context.argv["debug-check"]) {
-      /* istanbul ignore else */
-      if (result.filepath) {
-        context.logger.log(result.filepath);
-      } else {
-        process.exitCode = 2;
-      }
-    } else if (!context.argv.check && !context.argv["list-different"]) {
-      writeOutput(context, result, options);
-    }
-
-    if (isDifferent) {
-      if (context.argv.check) {
-        context.logger.warn(filename);
-      } else if (context.argv["list-different"]) {
-        context.logger.log(filename);
-      }
-      numberOfUnformattedFilesFound += 1;
-    }
+    worker.postMessage(pathOrError, fileIgnored);
   }
 
   // Print check summary based on expected exit code
@@ -427,4 +353,4 @@ function formatFiles(context) {
   }
 }
 
-module.exports = { format, formatStdin, formatFiles };
+module.exports = { format, formatStdin, formatFiles, writeOutput, handleError };

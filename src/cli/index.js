@@ -8,12 +8,12 @@ const stringify = require("fast-json-stable-stringify");
 const prettier = require("../index");
 const core = require("./core");
 
-function run(rawArguments) {
+async function run(rawArguments) {
   const logLevel = core.parseArgvWithoutPlugins(rawArguments, "loglevel")
     .loglevel;
   const logger = core.createLogger(logLevel);
   try {
-    main(rawArguments, logger);
+    await main(rawArguments, logger);
   } catch (error) {
     logger.error(error.message);
     process.exitCode = 1;
@@ -76,7 +76,7 @@ function main(rawArguments, logger) {
   } else if (useStdin) {
     core.formatStdin(context);
   } else if (hasFilePatterns) {
-    core.formatFiles(context);
+    await core.formatFiles(context);
   } else {
     logger.log(core.createUsage(context));
     process.exitCode = 1;

@@ -145,6 +145,17 @@ const coreBundles = [
     target: "node",
     externals: [
       path.resolve("src/index.js"),
+      path.resolve("src/bin/format-worker.js"),
+      path.resolve("src/common/third-party.js"),
+    ],
+  },
+  {
+    input: "src/bin/format-worker.js",
+    type: "core",
+    output: "format-worker.js",
+    target: "node",
+    externals: [
+      path.resolve("src/index.js"),
       path.resolve("src/common/third-party.js"),
     ],
   },
